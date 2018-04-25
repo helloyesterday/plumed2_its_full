@@ -1,0 +1,9 @@
+/html
+/latex
+/*.tmp
+/automatic
+/*PP.txt
+/links-to-user-manual.md
+/plumedcheck.md
+/coverage
+

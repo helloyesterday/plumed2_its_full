@@ -1,0 +1,7 @@
+export PATH="/home/yangy/opt/plumed2_its_full/src/lib/:$PATH"
+export LIBRARY_PATH="/home/yangy/opt/plumed2_its_full/src/lib/:$LIBRARY_PATH"
+export LD_LIBRARY_PATH="/home/yangy/opt/plumed2_its_full/src/lib/:$LD_LIBRARY_PATH"
+export DYLD_LIBRARY_PATH="/home/yangy/opt/plumed2_its_full/src/lib/:$DYLD_LIBRARY_PATH"
+export PLUMED_KERNEL="/home/yangy/opt/plumed2_its_full/src/lib/libplumedKernel.so"
+export PLUMED_VIMPATH="/home/yangy/opt/plumed2_its_full/vim"
+export PYTHONPATH="/home/yangy/opt/plumed2_its_full/python:$PYTHONPATH"

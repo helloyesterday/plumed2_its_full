@@ -1,0 +1,205 @@
+#!/bin/bash
+
+if test -n "$PLUMED_PREPEND_PATH" ; then
+  PATH="$PLUMED_PREPEND_PATH:$PATH"
+fi
+
+export valgrind=env
+
+for opt in ${*}
+do
+case "$opt" in
+(--valgrind) valgrind="valgrind --leak-check=full --show-reachable=yes" ;;
+(*) echo error ; exit ;;
+esac
+done
+
+{
+
+date
+echo "Running regtest in $(pwd)"
+
+if [ "$valgrind" = valgrind ] ; then
+echo "using valgrind"
+fi
+
+rm -fr tmp
+mkdir tmp
+cd tmp
+cp -f ../* . 2>/dev/null
+
+test -f config || {
+  echo "FAILURE: config not found"
+  exit 1
+}
+
+mpiprocs=0
+
+plumed_needs=
+plumed_modules=
+
+source ./config
+
+for file in $extra_files
+do
+  cp -f ../$file .
+done
+
+echo "++ Test type: $type"
+echo "++ Arguments: $arg"
+echo "++ Processors: $mpiprocs"
+
+mpi=env
+plumed="${PLUMED_PROGRAM_NAME:-plumed}"
+
+root=$($plumed --no-mpi info --root)
+
+if test -z "$root" ; then
+  echo "FAILURE: plumed executable not available"
+  exit 1
+fi
+
+cd ../../../../
+if [[ "${PWD}"/ != "$root" ]] ; then
+echo "WARNING using plumed from $root"
+fi
+cd -
+
+
+if ((mpiprocs>0)); then
+mpi=""
+if $plumed --no-mpi config -q mpiexec
+then
+  mpi="$($plumed --no-mpi config mpiexec)"
+fi
+if test -z "$mpi" ; then
+  mpi="${PLUMED_MPIRUN:-mpirun}"
+fi
+mpi="$mpi -np $mpiprocs"
+
+if ! $plumed config -q has mpi
+then
+  echo "NOT_APPLICABLE (MPI NOT INSTALLED)"
+  exit 0;
+fi
+
+else
+
+plumed="$plumed --no-mpi"
+
+fi
+
+if ((mpiprocs>0)) && [[ "$valgrind" != "env" ]]
+then
+  echo "NOT_APPLICABLE (MPI cannot be used with valgrind)"
+  exit 0;
+fi
+
+for need in $plumed_needs
+do
+  echo "Checking for $need"
+  if ! $plumed config -q has $need
+  then
+    echo "NOT_APPLICABLE ($need NOT ENABLED)"
+    exit 0;
+  fi
+done
+
+for module in $plumed_modules
+do
+  echo "Checking for $module"
+  if ! $plumed config -q module $module
+  then
+    echo "NOT_APPLICABLE ($module MODULE NOT INSTALLED)"
+    exit 0;
+  fi
+done
+
+if type -t plumed_custom_skip 1>/dev/null ; then
+  if plumed_custom_skip ; then
+    echo "NOT_APPLIABLE (plumed_custom_skip)"
+    exit 0;
+  fi
+fi
+
+if type -t plumed_regtest_before 1>/dev/null ; then
+  plumed_regtest_before
+fi
+
+case "$type" in
+(simplemd)
+  test -f in || {
+    echo "FAILURE: in file not present"
+    exit 1
+  }
+  $mpi $valgrind $plumed simplemd < in > out 2> err
+  ;;
+(driver)
+  $mpi $valgrind $plumed driver $arg > out 2> err
+  ;;
+(sum_hills)
+  $mpi $valgrind $plumed sum_hills $arg > out 2> err
+ ;;
+(make)
+  $plumed info --configuration > Makefile.conf
+  $plumed --is-installed || ln -s "$root/src" plumed
+  cat <($plumed info --configuration) "$root/src/lib/Plumed.inc.static" ../../../scripts/exe.make > Makefile 
+  make exe 1>out 2> err
+  $mpi $valgrind ./exe $arg >> out 2>> err
+ ;;
+(plumed)
+  $mpi $valgrind $plumed $arg > out 2> err
+  ;;
+(python)
+# make sure the right python module is in the path based on plumed root
+  PYTHONPATH="$root/python:$PYTHONPATH" $($plumed config python_bin) $arg > out 2> err
+  ;;
+(*) echo "FAILURE: unknown test type" ; exit 1 ;;
+esac
+exitcode="$?"
+if test $exitcode -ne 0 ; then
+  echo "FAILURE: exit code $exitcode"
+fi
+
+if type -t plumed_regtest_after 1>/dev/null ; then
+  plumed_regtest_after
+fi
+
+cat err
+
+
+if ls *.reference > /dev/null
+then
+for file in *.reference ; do
+  new="${file%.reference}"
+  if test -f "$new" ; then
+    ../../../scripts/fixzeroes.sh "$file"
+    cp "$new" "$new.zfix"
+    ../../../scripts/fixzeroes.sh "$new.zfix"
+    DIFFOPT=""
+# this is to enforce ASCII check
+# I add this option since sometime on travis some of the diff files are not shown
+# (files are thought to be binary for some reason)
+# In this way, at least PLUMED native files (with fields) will be assumed to be
+# ASCII and diff will be shown in the log
+    test "$(cat "$file" | head -c 10)" = "#! FIELDS " && DIFFOPT="-a"
+    out="$(diff $DIFFOPT "$file" "$new.zfix")"
+    test -n "$out" && {
+      echo FAILURE
+      echo "Diff for ${file%.reference}:"
+      echo "$out"
+    }
+  else
+    echo FAILURE
+    echo FILE $new does not exist
+  fi
+done
+else
+    echo WARNING
+    echo no file has been checked
+fi
+
+
+cd ../
+
+} | tee report.txt
